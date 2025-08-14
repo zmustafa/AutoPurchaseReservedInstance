@@ -14,9 +14,9 @@ The user-assigned managed identity (MI) is used across the utility to grant acce
 The Azure Storage Account uses Azure Tables only. The storage account is used to keep a list of approved Azure Subscriptions that can be used by the client when providing billing scope. The Azure Storage Table has empty schema (with no data) and only the Partition Key and Row ID are used as the Subscription ID for each of the approved subscription.
 
 ### 2.1.3  Logic Apps
-####  2.1.3.1 LA 1
-####  2.1.3.2 LA 1
-####  2.1.3.3 LA 1
+####  2.1.3.1 LogicApp-Approved-Subscriptions-Updater
+####  2.1.3.2 LogicApp-RI-Calculate
+####  2.1.3.3 LogicApp-RI-Purchase
 
 The utility can be restricted to allow purchase of RIs under a specific billing scope only. 
 
