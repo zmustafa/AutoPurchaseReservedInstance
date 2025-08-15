@@ -24,7 +24,7 @@ The list of approved subscriptions that can be used as an approved billing scope
 
 
 ## 2.2 Client Side
-The HTTP calls to the Logic App to invoke calculate/purchase API can either be made using the provided C# WinForms app or provided PowerShell script.
+The HTTP calls to the Logic App to invoke calculate/purchase API can be made using the provided PowerShell script.
 
 # 3. Steps to setup 
 1. Create a managed identity ManagedIdentity-RIPurchasherAccess
@@ -33,6 +33,9 @@ The HTTP calls to the Logic App to invoke calculate/purchase API can either be m
 4. Create a blank logic app call it 'LogicApp-Approved-Subscriptions-Updater'
 5. Modify logic app 'LogicApp-Approved-Subscriptions-Updater' to use the user generated managed identity 'ManagedIdentity-RIPurchasherAccess'
 6. Clone the logic app 'LogicApp-Approved-Subscriptions-Updater' to two more logic apps 'LogicApp-RI-Calculate' and 'LogicApp-RI-Purchase' (in total they become 3)
+7. Add storage connector to each of the logic apps.
+8. Paste the code, except the connection part at the bottom.
+9. Take note of the two URLs of each of the logic apps  'LogicApp-RI-Calculate' and 'LogicApp-RI-Purchase' and to use them via PowerShell script.
 
 # 4 Make a Reserved Instance purchase
 ## 4.1 Create Reservation Order
