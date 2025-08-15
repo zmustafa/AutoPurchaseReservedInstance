@@ -33,3 +33,24 @@ The HTTP calls to the Logic App to invoke calculate/purchase API can either be m
 4. Create a blank logic app call it 'LogicApp-Approved-Subscriptions-Updater'
 5. Modify logic app 'LogicApp-Approved-Subscriptions-Updater' to use the user generated managed identity 'ManagedIdentity-RIPurchasherAccess'
 6. Clone the logic app 'LogicApp-Approved-Subscriptions-Updater' to two more logic apps 'LogicApp-RI-Calculate' and 'LogicApp-RI-Purchase' (in total they become 3)
+
+# 4 Make a Reserved Instance purchase
+## 4.1 Create Reservation Order
+```powershell
+.\AzureReservation.ps1 -Operation CreateReservation -SkuName "Standard_B1s" -Location "eastus" -Term "P1Y" -Quantity 1 -BillingScopeId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -AppliedScopeType "Shared" -AppliedScopes "/subscriptions/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -logicAppUrl "https://xxxxxx.azure.com:443/workflows/xxxxxxxxxxxxxxxxxx2/triggers/When_a_HTTP_request_is_received/..." -Verbose 
+```
+Output is the Order ID. Take note of this and use it in the next command
+```powershell
+Reservation Order ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+## 4.2 Purchase the Reservation Order
+```powershell
+.\AzureReservation.ps1 -Operation PurchaseReservation -ReservationOrderId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -SkuName "Standard_B1s" -Location "eastus" -Term "P1Y" -Quantity 1 -BillingScopeId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -AppliedScopeType "Shared" -AppliedScopes "/subscriptions/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -logicAppUrl "https://xxxxxx.azure.com:443/workflows/xxxxxxxxxxxxxxxxxx2/triggers/When_a_HTTP_request_is_received/..." -Verbose
+```
+
+Confirm purchase
+```powershell
+Are you sure you want to purchase the reservation? (Y/N) y
+```
+
