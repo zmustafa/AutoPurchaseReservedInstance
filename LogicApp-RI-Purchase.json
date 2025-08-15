@@ -1,1 +1,287 @@
 
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "When_a_HTTP_request_is_received": {
+                "type": "Request",
+                "kind": "Http",
+                "inputs": {
+                    "schema": {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "type": "object",
+                        "properties": {
+                            "sku_name": {
+                                "type": "string",
+                                "description": "The name of the SKU"
+                            },
+                            "location": {
+                                "type": "string",
+                                "description": "The location of the resource"
+                            },
+                            "properties_reservedResourceType": {
+                                "type": "string",
+                                "description": "The type of reserved resource"
+                            },
+                            "properties_billingScopeId": {
+                                "type": "string",
+                                "description": "The billing scope ID"
+                            },
+                            "properties_term": {
+                                "type": "string",
+                                "description": "The term of the reservation"
+                            },
+                            "properties_quantity": {
+                                "type": "integer",
+                                "description": "The quantity of resources"
+                            },
+                            "properties_appliedScopeType": {
+                                "type": "string",
+                                "description": "The type of applied scope"
+                            },
+                            "properties_displayName": {
+                                "type": "string",
+                                "description": "The display name of the reservation"
+                            },
+                            "properties_instanceFlexibility": {
+                                "type": "string",
+                                "description": "The instance flexibility setting"
+                            },
+                            "properties_renew": {
+                                "type": "boolean",
+                                "description": "Whether the reservation auto-renews"
+                            },
+                            "properties_billingPlan": {
+                                "type": "string",
+                                "description": "The billing plan for the reservation"
+                            },
+                            "properties_reservedResourceProperties_instanceFlexibility": {
+                                "type": "string",
+                                "description": "The instance flexibility setting for reserved resource properties"
+                            },
+                            "properties_appliedScopes": {
+                                "type": "string",
+                                "description": "Scope ID"
+                            },
+                            "reservationOrderId": {
+                                "type": "string",
+                                "description": "Reservation Order ID"
+                            }
+                        },
+                        "required": [
+                            "sku_name",
+                            "location",
+                            "properties_reservedResourceType",
+                            "properties_billingScopeId",
+                            "properties_term",
+                            "properties_quantity",
+                            "properties_appliedScopeType",
+                            "properties_displayName",
+                            "properties_instanceFlexibility",
+                            "properties_renew",
+                            "properties_billingPlan",
+                            "properties_reservedResourceProperties_instanceFlexibility",
+                            "properties_appliedScopes"
+                        ],
+                        "additionalProperties": false
+                    }
+                }
+            }
+        },
+        "actions": {
+            "Get_entity_(V2)": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuretables']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent('AccountNameFromSettings'))}/tables/@{encodeURIComponent('subs')}/entities(PartitionKey='@{encodeURIComponent(triggerBody()?['properties_billingScopeId'])}',RowKey='@{encodeURIComponent(triggerBody()?['properties_billingScopeId'])}')"
+                },
+                "runAfter": {}
+            },
+            "Condition": {
+                "type": "If",
+                "expression": {
+                    "and": [
+                        {
+                            "equals": [
+                                "@body('Get_entity_(V2)')?['RowKey']",
+                                "@triggerBody()?['properties_billingScopeId']"
+                            ]
+                        }
+                    ]
+                },
+                "actions": {
+                    "HTTP2": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "https://management.azure.com/providers/Microsoft.Capacity/reservationOrders/1?api-version=2022-11-01",
+                            "method": "PUT",
+                            "body": {
+                                "sku": {
+                                    "name": "@{triggerBody()?['sku_name']}"
+                                },
+                                "location": "@{triggerBody()?['location']}",
+                                "properties": {
+                                    "reservedResourceType": "@{triggerBody()?['properties_reservedResourceType']}",
+                                    "billingScopeId": "/subscriptions/@{triggerBody()?['properties_billingScopeId']}",
+                                    "term": "@{triggerBody()?['properties_term']}",
+                                    "quantity": "@triggerBody()?['properties_quantity']",
+                                    "appliedScopeType": "@{triggerBody()?['properties_appliedScopeType']}",
+                                    "displayName": "@{triggerBody()?['properties_displayName']}",
+                                    "instanceFlexibility": "@{triggerBody()?['properties_instanceFlexibility']}",
+                                    "renew": "@triggerBody()?['properties_renew']",
+                                    "billingPlan": "@{triggerBody()?['properties_billingPlan']}",
+                                    "reservedResourceProperties": {
+                                        "instanceFlexibility": "@{triggerBody()?['properties_reservedResourceProperties_instanceFlexibility']}"
+                                    },
+                                    "appliedScopes": "@triggerBody()?['properties_appliedScopes']"
+                                },
+                                "orderId": "1@{triggerBody()?['reservationOrderId']}",
+                                "isPurchaseRecommended": false,
+                                "isPurchaseIsfGrouped": false
+                            },
+                            "authentication": {
+                                "type": "ManagedServiceIdentity",
+                                "identity": ""
+                            }
+                        }
+                    },
+                    "Parse_JSON": {
+                        "type": "ParseJson",
+                        "inputs": {
+                            "content": "@body('HTTP2')",
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "type": {
+                                        "type": "string"
+                                    },
+                                    "etag": {
+                                        "type": "integer"
+                                    },
+                                    "properties": {
+                                        "type": "object",
+                                        "properties": {
+                                            "originalQuantity": {
+                                                "type": "integer"
+                                            },
+                                            "requestDateTime": {
+                                                "type": "string"
+                                            },
+                                            "billingPlan": {
+                                                "type": "string"
+                                            },
+                                            "reservations": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "id"
+                                                    ]
+                                                }
+                                            },
+                                            "term": {
+                                                "type": "string"
+                                            },
+                                            "displayName": {
+                                                "type": "string"
+                                            },
+                                            "provisioningState": {
+                                                "type": "string"
+                                            },
+                                            "billingProfileId": {
+                                                "type": "string"
+                                            },
+                                            "billingAccountId": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "HTTP2": [
+                                "Succeeded",
+                                "Failed",
+                                "Skipped",
+                                "TimedOut"
+                            ]
+                        }
+                    },
+                    "Response": {
+                        "type": "Response",
+                        "kind": "Http",
+                        "inputs": {
+                            "statusCode": 200,
+                            "body": "@body('HTTP2')"
+                        },
+                        "runAfter": {
+                            "Parse_JSON": [
+                                "Succeeded",
+                                "Failed",
+                                "Skipped",
+                                "TimedOut"
+                            ]
+                        }
+                    }
+                },
+                "else": {
+                    "actions": {
+                        "Response_1": {
+                            "type": "Response",
+                            "kind": "Http",
+                            "inputs": {
+                                "statusCode": 200,
+                                "body": "Not allowed to buy reservation under this billing scope."
+                            }
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Get_entity_(V2)": [
+                        "Succeeded",
+                        "Failed",
+                        "Skipped",
+                        "TimedOut"
+                    ]
+                }
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "azuretables": {
+                    "id": "azuretables",
+                    "connectionId": "azuretables",
+                    "connectionName": "azuretables"
+                }
+            }
+        }
+    }
+}
