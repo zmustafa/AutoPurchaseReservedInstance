@@ -1,1 +1,188 @@
 
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "Every_day_at_6am_EST": {
+                "type": "Recurrence",
+                "recurrence": {
+                    "frequency": "Day",
+                    "interval": 1,
+                    "timeZone": "Eastern Standard Time",
+                    "schedule": {
+                        "hours": [
+                            6
+                        ]
+                    }
+                }
+            }
+        },
+        "actions": {
+            "Get_All_Subs_under_a_management_group": {
+                "type": "Http",
+                "inputs": {
+                    "uri": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources",
+                    "method": "POST",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "queries": {
+                        "api-version": "2021-03-01"
+                    },
+                    "body": {
+                        "query": "resourcecontainers | where type == 'microsoft.resources/subscriptions' | extend mgChain = properties.managementGroupAncestorsChain | mv-expand mg = mgChain | where mg.name == '@{variables('ManagementGroupName')}' | summarize mgChain = make_list(mgChain) by subscriptionId, subscriptionName = name | project subscriptionId"
+                    },
+                    "authentication": {
+                        "type": "ManagedServiceIdentity",
+                        "identity": "",
+                        "audience": ""
+                    }
+                },
+                "runAfter": {
+                    "Initialize_variables": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Get_existing_subs_in_Azure_Table": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuretables']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent('AccountNameFromSettings'))}/tables/@{encodeURIComponent('subs')}/entities"
+                },
+                "runAfter": {
+                    "Parse_received_subscriptions": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Delete_existing_Sub_IDs_in_Azure_Table": {
+                "type": "Foreach",
+                "foreach": "@body('Get_existing_subs_in_Azure_Table')?['value']",
+                "actions": {
+                    "Delete_Azure_Sub_Id": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['azuretables']['connectionId']"
+                                }
+                            },
+                            "method": "delete",
+                            "path": "/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent('AccountNameFromSettings'))}/tables/@{encodeURIComponent('subs')}/entities/etag(PartitionKey='@{encodeURIComponent(items('Delete_existing_Sub_IDs_in_Azure_Table')?['PartitionKey'])}',RowKey='@{encodeURIComponent(item()?['RowKey'])}')"
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Get_existing_subs_in_Azure_Table": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Parse_received_subscriptions": {
+                "type": "ParseJson",
+                "inputs": {
+                    "content": "@body('Get_All_Subs_under_a_management_group')",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "totalRecords": {
+                                "type": "integer"
+                            },
+                            "count": {
+                                "type": "integer"
+                            },
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "subscriptionId": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "subscriptionId"
+                                    ]
+                                }
+                            },
+                            "facets": {
+                                "type": "array"
+                            },
+                            "resultTruncated": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Get_All_Subs_under_a_management_group": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Insert_new_Sub_IDs_in_Azure_Table": {
+                "type": "Foreach",
+                "foreach": "@outputs('Parse_received_subscriptions')?['body']?['data']",
+                "actions": {
+                    "Add_Azure_Sub_Id": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['azuretables']['connectionId']"
+                                }
+                            },
+                            "method": "patch",
+                            "body": {},
+                            "path": "/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent('AccountNameFromSettings'))}/tables/@{encodeURIComponent('subs')}/entities(PartitionKey='@{encodeURIComponent(items('Insert_new_Sub_IDs_in_Azure_Table')?['subscriptionId'])}',RowKey='@{encodeURIComponent(item()?['subscriptionId'])}')"
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Delete_existing_Sub_IDs_in_Azure_Table": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Initialize_variables": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "ManagementGroupName",
+                            "type": "string",
+                            "value": "mgmt-group-id"
+                        }
+                    ]
+                },
+                "runAfter": {}
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "azuretables": {
+                    "id": "azuretables",
+                    "connectionId": "azuretables",
+                    "connectionName": "azuretables"
+                }
+            }
+        }
+    }
+}
