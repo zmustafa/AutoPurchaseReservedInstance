@@ -1,1 +1,240 @@
-
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "When_a_HTTP_request_is_received": {
+                "type": "Request",
+                "kind": "Http",
+                "inputs": {
+                    "method": "POST",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "properties_billingScopeId": {
+                                "type": "string"
+                            },
+                            "properties_renew": {
+                                "type": "boolean"
+                            },
+                            "properties_billingPlan": {
+                                "type": "string"
+                            },
+                            "properties_appliedScopes": {
+                                "type": "string"
+                            },
+                            "properties_reservedResourceType": {
+                                "type": "string"
+                            },
+                            "properties_reservedResourceProperties_instanceFlexibility": {
+                                "type": "string"
+                            },
+                            "properties_term": {
+                                "type": "string"
+                            },
+                            "location": {
+                                "type": "string"
+                            },
+                            "properties_instanceFlexibility": {
+                                "type": "string"
+                            },
+                            "properties_displayName": {
+                                "type": "string"
+                            },
+                            "properties_appliedScopeType": {
+                                "type": "string"
+                            },
+                            "sku_name": {
+                                "type": "string"
+                            },
+                            "properties_quantity": {
+                                "type": "integer"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "actions": {
+            "Get_entity_(V2)": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuretables']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent('AccountNameFromSettings'))}/tables/@{encodeURIComponent('subs')}/entities(PartitionKey='@{encodeURIComponent(triggerBody()?['properties_billingScopeId'])}',RowKey='@{encodeURIComponent(triggerBody()?['properties_billingScopeId'])}')"
+                },
+                "runAfter": {}
+            },
+            "Condition": {
+                "type": "If",
+                "expression": {
+                    "and": [
+                        {
+                            "equals": [
+                                "@body('Get_entity_(V2)')?['RowKey']",
+                                "@triggerBody()?['properties_billingScopeId']"
+                            ]
+                        }
+                    ]
+                },
+                "actions": {
+                    "HTTP2": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "https://management.azure.com/providers/Microsoft.Capacity/calculatePrice?api-version=2022-11-01",
+                            "method": "POST",
+                            "body": {
+                                "sku": {
+                                    "name": "@{triggerBody()?['sku_name']}"
+                                },
+                                "location": "@{triggerBody()?['location']}",
+                                "properties": {
+                                    "reservedResourceType": "@{triggerBody()?['properties_reservedResourceType']}",
+                                    "billingScopeId": "/subscriptions/@{triggerBody()?['properties_billingScopeId']}",
+                                    "term": "@{triggerBody()?['properties_term']}",
+                                    "quantity": "@triggerBody()?['properties_quantity']",
+                                    "appliedScopeType": "@{triggerBody()?['properties_appliedScopeType']}",
+                                    "displayName": "@{triggerBody()?['properties_displayName']}",
+                                    "instanceFlexibility": "@{triggerBody()?['properties_instanceFlexibility']}",
+                                    "renew": "@triggerBody()?['properties_renew']",
+                                    "billingPlan": "@{triggerBody()?['properties_billingPlan']}",
+                                    "reservedResourceProperties": {
+                                        "instanceFlexibility": "@{triggerBody()?['properties_reservedResourceProperties_instanceFlexibility']}"
+                                    },
+                                    "appliedScopes": "@triggerBody()?['properties_appliedScopes']"
+                                }
+                            },
+                            "authentication": {
+                                "type": "ManagedServiceIdentity",
+                                "identity": ""
+                            }
+                        }
+                    },
+                    "Parse_JSON": {
+                        "type": "ParseJson",
+                        "inputs": {
+                            "content": "@body('HTTP2')",
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "properties": {
+                                        "type": "object",
+                                        "properties": {
+                                            "billingCurrencyTotal": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "currencyCode": {
+                                                        "type": "string"
+                                                    },
+                                                    "amount": {
+                                                        "type": "number"
+                                                    }
+                                                }
+                                            },
+                                            "netTotal": {
+                                                "type": "integer"
+                                            },
+                                            "taxTotal": {
+                                                "type": "integer"
+                                            },
+                                            "grandTotal": {
+                                                "type": "integer"
+                                            },
+                                            "reservationOrderId": {
+                                                "type": "string"
+                                            },
+                                            "skuTitle": {
+                                                "type": "string"
+                                            },
+                                            "skuDescription": {
+                                                "type": "string"
+                                            },
+                                            "pricingCurrencyTotal": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "currencyCode": {
+                                                        "type": "string"
+                                                    },
+                                                    "amount": {
+                                                        "type": "integer"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "HTTP2": [
+                                "Succeeded",
+                                "Failed",
+                                "Skipped",
+                                "TimedOut"
+                            ]
+                        }
+                    },
+                    "Response": {
+                        "type": "Response",
+                        "kind": "Http",
+                        "inputs": {
+                            "statusCode": 200,
+                            "body": "@body('HTTP2')"
+                        },
+                        "runAfter": {
+                            "Parse_JSON": [
+                                "Succeeded",
+                                "Failed",
+                                "Skipped",
+                                "TimedOut"
+                            ]
+                        }
+                    }
+                },
+                "else": {
+                    "actions": {
+                        "Response_1": {
+                            "type": "Response",
+                            "kind": "Http",
+                            "inputs": {
+                                "statusCode": 200,
+                                "body": "Not allowed to buy reservation under this billing scope."
+                            }
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Get_entity_(V2)": [
+                        "Succeeded",
+                        "Failed",
+                        "Skipped",
+                        "TimedOut"
+                    ]
+                }
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "azuretables": {
+                    "id": "azuretables",
+                    "connectionId": "azuretables",
+                    "connectionName": "azuretables"
+                }
+            }
+        }
+    }
+}
