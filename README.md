@@ -1,7 +1,7 @@
 # Automatically Purchase Reserved Instance in Azure
 
 # 1. Introduction
-This utility allows to setup logic apps which can be invoked to purchase Azure Reserved Instances.
+This utility allows to automatically purchase Azure Reserved Instances via simplified PowerShell script.
 
 # 2. Components
 ## 2.1 Server Side
