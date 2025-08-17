@@ -5,7 +5,7 @@
     "location": { "type": "string", "defaultValue": "[resourceGroup().location]" },
     "storageAccountName": { "type": "string", "defaultValue": "[concat('st', uniqueString(resourceGroup().id))]" },
     "tableName": { "type": "string", "defaultValue": "subs" },
-    "identityName": { "type": "string", "defaultValue": "la-uami" },
+    "identityName": { "type": "string", "defaultValue": "ManagedIdentity-RIPurchasherAccess" },
     "laApprovedSubsUpdaterName": { "type": "string", "defaultValue": "LogicApp-Approved-Subscriptions-Updater" },
     "laRICalculateName": { "type": "string", "defaultValue": "LogicApp-RI-Calculate" },
     "laRIPurchaseName": { "type": "string", "defaultValue": "LogicApp-RI-Purchase" },
