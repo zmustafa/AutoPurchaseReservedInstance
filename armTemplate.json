@@ -1,0 +1,590 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": { "type": "string", "defaultValue": "[resourceGroup().location]" },
+    "storageAccountName": { "type": "string", "defaultValue": "[concat('st', uniqueString(resourceGroup().id))]" },
+    "tableName": { "type": "string", "defaultValue": "subs" },
+    "identityName": { "type": "string", "defaultValue": "la-uami" },
+    "laApprovedSubsUpdaterName": { "type": "string", "defaultValue": "LogicApp-Approved-Subscriptions-Updater" },
+    "laRICalculateName": { "type": "string", "defaultValue": "LogicApp-RI-Calculate" },
+    "laRIPurchaseName": { "type": "string", "defaultValue": "LogicApp-RI-Purchase" },
+    "managementGroupName": { "type": "string" },
+    "recurrenceHour": { "type": "int", "defaultValue": 6, "minValue": 0, "maxValue": 23 },
+    "recurrenceTimeZone": { "type": "string", "defaultValue": "Eastern Standard Time" },
+    "recurrenceIntervalDays": { "type": "int", "defaultValue": 1, "minValue": 1 }
+  },
+  "variables": {
+    "azureTablesConnectionName": "azuretables",
+    "tableRbacRoleId": "/providers/Microsoft.Authorization/roleDefinitions/0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-01-01",
+      "name": "[parameters('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "kind": "StorageV2",
+      "sku": { "name": "Standard_LRS" },
+      "properties": { "supportsHttpsTrafficOnly": true }
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[parameters('identityName')]",
+      "location": "[parameters('location')]",
+      "properties": {}
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), variables('tableRbacRoleId'))]",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')]",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), '2023-01-31').principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deploymentScripts",
+      "apiVersion": "2020-10-01",
+      "name": "createTableSubs",
+      "location": "[parameters('location')]",
+      "kind": "AzureCLI",
+      "identity": {
+        "type": "userAssigned",
+        "userAssignedIdentities": {
+          "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]": {}
+        }
+      },
+      "properties": {
+        "azCliVersion": "2.57.0",
+        "timeout": "PT15M",
+        "arguments": "[format('--sa {0} --table {1}', parameters('storageAccountName'), parameters('tableName'))]",
+        "scriptContent": "SA=\"\"; TABLE=\"\"; while [[ $# -gt 0 ]]; do case $1 in --sa) SA=\"$2\"; shift 2;; --table) TABLE=\"$2\"; shift 2;; *) shift;; esac; done; az storage table create --name \"$TABLE\" --account-name \"$SA\" --auth-mode login",
+        "cleanupPreference": "OnSuccess",
+        "retentionInterval": "P1D"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]",
+        "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName')), variables('tableRbacRoleId')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/connections",
+      "apiVersion": "2016-06-01",
+      "name": "[variables('azureTablesConnectionName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "displayName": "[concat('azuretables-', parameters('storageAccountName'))]",
+        "customParameterValues": {},
+        "parameterValues": {
+          "storageaccount": "[parameters('storageAccountName')]",
+          "sharedkey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').keys[0].value]"
+        },
+        "api": {
+          "name": "azuretables",
+          "displayName": "Azure Table Storage",
+          "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuretables')]",
+          "type": "ManagedService"
+        }
+      },
+      "dependsOn": [ "createTableSubs" ]
+    },
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('laApprovedSubsUpdaterName')]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]": {}
+        }
+      },
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "$connections": { "type": "Object", "defaultValue": {} },
+            "ManagementGroupName": { "type": "String" },
+            "StorageAccountName": { "type": "String" },
+            "TableName": { "type": "String" },
+            "RecurrenceHour": { "type": "Int" },
+            "RecurrenceTimeZone": { "type": "String" },
+            "RecurrenceIntervalDays": { "type": "Int" }
+          },
+          "triggers": {
+            "Every_day_at_configured_time": {
+              "type": "Recurrence",
+              "recurrence": {
+                "frequency": "Day",
+                "interval": "@parameters('RecurrenceIntervalDays')",
+                "timeZone": "@parameters('RecurrenceTimeZone')",
+                "schedule": { "hours": [ "@parameters('RecurrenceHour')" ] }
+              }
+            }
+          },
+          "actions": {
+            "Initialize_variables": {
+              "type": "InitializeVariable",
+              "inputs": {
+                "variables": [
+                  {
+                    "name": "ManagementGroupName",
+                    "type": "string",
+                    "value": "@parameters('ManagementGroupName')"
+                  }
+                ]
+              },
+              "runAfter": {}
+            },
+            "Get_All_Subs_under_a_management_group": {
+              "type": "Http",
+              "inputs": {
+                "uri": "https://management.azure.com/providers/Microsoft.ResourceGraph/resources",
+                "method": "POST",
+                "headers": { "Content-Type": "application/json" },
+                "queries": { "api-version": "2021-03-01" },
+                "body": {
+                  "query": "resourcecontainers | where type == 'microsoft.resources/subscriptions' | extend mgChain = properties.managementGroupAncestorsChain | mv-expand mg = mgChain | where mg.name == '@{variables('ManagementGroupName')}' | summarize mgChain = make_list(mgChain) by subscriptionId, subscriptionName = name | project subscriptionId"
+                },
+                "authentication": { "type": "ManagedServiceIdentity", "audience": "https://management.azure.com/" }
+              },
+              "runAfter": { "Initialize_variables": [ "Succeeded" ] }
+            },
+            "Parse_received_subscriptions": {
+              "type": "ParseJson",
+              "inputs": {
+                "content": "@body('Get_All_Subs_under_a_management_group')",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "totalRecords": { "type": "integer" },
+                    "count": { "type": "integer" },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": { "subscriptionId": { "type": "string" } },
+                        "required": [ "subscriptionId" ]
+                      }
+                    },
+                    "facets": { "type": "array" },
+                    "resultTruncated": { "type": "string" }
+                  }
+                }
+              },
+              "runAfter": { "Get_All_Subs_under_a_management_group": [ "Succeeded" ] }
+            },
+            "Get_existing_subs_in_Azure_Table": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": { "connection": { "name": "@parameters('$connections')['azuretables']['connectionId']" } },
+                "method": "get",
+                "path": "/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent(parameters('StorageAccountName')))}/tables/@{encodeURIComponent(parameters('TableName'))}/entities"
+              },
+              "runAfter": { "Parse_received_subscriptions": [ "Succeeded" ] }
+            },
+            "Delete_existing_Sub_IDs_in_Azure_Table": {
+              "type": "Foreach",
+              "foreach": "@body('Get_existing_subs_in_Azure_Table')?['value']",
+              "actions": {
+                "Delete_Azure_Sub_Id": {
+                  "type": "ApiConnection",
+                  "inputs": {
+                    "host": { "connection": { "name": "@parameters('$connections')['azuretables']['connectionId']" } },
+                    "method": "delete",
+                    "path": "/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent(parameters('StorageAccountName')))}/tables/@{encodeURIComponent(parameters('TableName'))}/entities/etag(PartitionKey='@{encodeURIComponent(items('Delete_existing_Sub_IDs_in_Azure_Table')?['PartitionKey'])}',RowKey='@{encodeURIComponent(item()?['RowKey'])}')"
+                  }
+                }
+              },
+              "runAfter": { "Get_existing_subs_in_Azure_Table": [ "Succeeded" ] }
+            },
+            "Insert_new_Sub_IDs_in_Azure_Table": {
+              "type": "Foreach",
+              "foreach": "@outputs('Parse_received_subscriptions')?['body']?['data']",
+              "actions": {
+                "Add_Azure_Sub_Id": {
+                  "type": "ApiConnection",
+                  "inputs": {
+                    "host": { "connection": { "name": "@parameters('$connections')['azuretables']['connectionId']" } },
+                    "method": "patch",
+                    "body": {},
+                    "path": "/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent(parameters('StorageAccountName')))}/tables/@{encodeURIComponent(parameters('TableName'))}/entities(PartitionKey='@{encodeURIComponent(items('Insert_new_Sub_IDs_in_Azure_Table')?['subscriptionId'])}',RowKey='@{encodeURIComponent(item()?['subscriptionId'])}')"
+                  }
+                }
+              },
+              "runAfter": { "Delete_existing_Sub_IDs_in_Azure_Table": [ "Succeeded" ] }
+            }
+          },
+          "outputs": {}
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "azuretables": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('azureTablesConnectionName'))]",
+                "connectionName": "[variables('azureTablesConnectionName')]",
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuretables')]"
+              }
+            }
+          },
+          "ManagementGroupName": { "value": "[parameters('managementGroupName')]" },
+          "StorageAccountName": { "value": "[parameters('storageAccountName')]" },
+          "TableName": { "value": "[parameters('tableName')]" },
+          "RecurrenceHour": { "value": "[parameters('recurrenceHour')]" },
+          "RecurrenceTimeZone": { "value": "[parameters('recurrenceTimeZone')]" },
+          "RecurrenceIntervalDays": { "value": "[parameters('recurrenceIntervalDays')]" }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', variables('azureTablesConnectionName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('laRICalculateName')]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]": {}
+        }
+      },
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "$connections": { "type": "Object", "defaultValue": {} },
+            "StorageAccountName": { "type": "String" },
+            "TableName": { "type": "String" }
+          },
+          "triggers": {
+            "When_a_HTTP_request_is_received": {
+              "type": "Request",
+              "kind": "Http",
+              "inputs": {
+                "method": "POST",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "properties_billingScopeId": { "type": "string" },
+                    "properties_renew": { "type": "boolean" },
+                    "properties_billingPlan": { "type": "string" },
+                    "properties_appliedScopes": { "type": "string" },
+                    "properties_reservedResourceType": { "type": "string" },
+                    "properties_reservedResourceProperties_instanceFlexibility": { "type": "string" },
+                    "properties_term": { "type": "string" },
+                    "location": { "type": "string" },
+                    "properties_instanceFlexibility": { "type": "string" },
+                    "properties_displayName": { "type": "string" },
+                    "properties_appliedScopeType": { "type": "string" },
+                    "sku_name": { "type": "string" },
+                    "properties_quantity": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "actions": {
+            "Get_entity_(V2)": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": { "connection": { "name": "@parameters('$connections')['azuretables']['connectionId']" } },
+                "method": "get",
+                "path": "/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent(parameters('StorageAccountName')))}/tables/@{encodeURIComponent(parameters('TableName'))}/entities(PartitionKey='@{encodeURIComponent(triggerBody()?['properties_billingScopeId'])}',RowKey='@{encodeURIComponent(triggerBody()?['properties_billingScopeId'])}')"
+              },
+              "runAfter": {}
+            },
+            "Condition": {
+              "type": "If",
+              "expression": { "and": [ { "equals": [ "@body('Get_entity_(V2)')?['RowKey']", "@{triggerBody()?['properties_billingScopeId']}" ] } ] },
+              "actions": {
+                "HTTP2": {
+                  "type": "Http",
+                  "inputs": {
+                    "uri": "https://management.azure.com/providers/Microsoft.Capacity/calculatePrice?api-version=2022-11-01",
+                    "method": "POST",
+                    "body": {
+                      "sku": { "name": "@{triggerBody()?['sku_name']}" },
+                      "location": "@{triggerBody()?['location']}",
+                      "properties": {
+                        "reservedResourceType": "@{triggerBody()?['properties_reservedResourceType']}",
+                        "billingScopeId": "/subscriptions/@{triggerBody()?['properties_billingScopeId']}",
+                        "term": "@{triggerBody()?['properties_term']}",
+                        "quantity": "@{triggerBody()?['properties_quantity']}",
+                        "appliedScopeType": "@{triggerBody()?['properties_appliedScopeType']}",
+                        "displayName": "@{triggerBody()?['properties_displayName']}",
+                        "instanceFlexibility": "@{triggerBody()?['properties_instanceFlexibility']}",
+                        "renew": "@{triggerBody()?['properties_renew']}",
+                        "billingPlan": "@{triggerBody()?['properties_billingPlan']}",
+                        "reservedResourceProperties": { "instanceFlexibility": "@{triggerBody()?['properties_reservedResourceProperties_instanceFlexibility']}" },
+                        "appliedScopes": "@{triggerBody()?['properties_appliedScopes']}"
+                      }
+                    },
+                    "authentication": { "type": "ManagedServiceIdentity", "audience": "https://management.azure.com/" }
+                  }
+                },
+                "Parse_JSON": {
+                  "type": "ParseJson",
+                  "inputs": {
+                    "content": "@body('HTTP2')",
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "properties": {
+                          "type": "object",
+                          "properties": {
+                            "billingCurrencyTotal": { "type": "object", "properties": { "currencyCode": { "type": "string" }, "amount": { "type": "number" } } },
+                            "netTotal": { "type": "integer" },
+                            "taxTotal": { "type": "integer" },
+                            "grandTotal": { "type": "integer" },
+                            "reservationOrderId": { "type": "string" },
+                            "skuTitle": { "type": "string" },
+                            "skuDescription": { "type": "string" },
+                            "pricingCurrencyTotal": { "type": "object", "properties": { "currencyCode": { "type": "string" }, "amount": { "type": "integer" } } }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "runAfter": { "HTTP2": [ "Succeeded", "Failed", "Skipped", "TimedOut" ] }
+                },
+                "Response": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "inputs": { "statusCode": 200, "body": "@body('HTTP2')" },
+                  "runAfter": { "Parse_JSON": [ "Succeeded", "Failed", "Skipped", "TimedOut" ] }
+                }
+              },
+              "else": {
+                "actions": {
+                  "Response_1": {
+                    "type": "Response",
+                    "kind": "Http",
+                    "inputs": { "statusCode": 200, "body": "Not allowed to buy reservation under this billing scope." }
+                  }
+                }
+              },
+              "runAfter": { "Get_entity_(V2)": [ "Succeeded", "Failed", "Skipped", "TimedOut" ] }
+            }
+          },
+          "outputs": {}
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "azuretables": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('azureTablesConnectionName'))]",
+                "connectionName": "[variables('azureTablesConnectionName')]",
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuretables')]"
+              }
+            }
+          },
+          "StorageAccountName": { "value": "[parameters('storageAccountName')]" },
+          "TableName": { "value": "[parameters('tableName')]" }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', variables('azureTablesConnectionName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('laRIPurchaseName')]",
+      "location": "[parameters('location')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]": {}
+        }
+      },
+      "properties": {
+        "state": "Enabled",
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "$connections": { "type": "Object", "defaultValue": {} },
+            "StorageAccountName": { "type": "String" },
+            "TableName": { "type": "String" }
+          },
+          "triggers": {
+            "When_a_HTTP_request_is_received": {
+              "type": "Request",
+              "kind": "Http",
+              "inputs": {
+                "schema": {
+                  "$schema": "http://json-schema.org/draft-07/schema#",
+                  "type": "object",
+                  "properties": {
+                    "sku_name": { "type": "string" },
+                    "location": { "type": "string" },
+                    "properties_reservedResourceType": { "type": "string" },
+                    "properties_billingScopeId": { "type": "string" },
+                    "properties_term": { "type": "string" },
+                    "properties_quantity": { "type": "integer" },
+                    "properties_appliedScopeType": { "type": "string" },
+                    "properties_displayName": { "type": "string" },
+                    "properties_instanceFlexibility": { "type": "string" },
+                    "properties_renew": { "type": "boolean" },
+                    "properties_billingPlan": { "type": "string" },
+                    "properties_reservedResourceProperties_instanceFlexibility": { "type": "string" },
+                    "properties_appliedScopes": { "type": "string" },
+                    "reservationOrderId": { "type": "string" }
+                  },
+                  "required": [
+                    "sku_name","location","properties_reservedResourceType","properties_billingScopeId",
+                    "properties_term","properties_quantity","properties_appliedScopeType","properties_displayName",
+                    "properties_instanceFlexibility","properties_renew","properties_billingPlan",
+                    "properties_reservedResourceProperties_instanceFlexibility","properties_appliedScopes"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "actions": {
+            "Get_entity_(V2)": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": { "connection": { "name": "@parameters('$connections')['azuretables']['connectionId']" } },
+                "method": "get",
+                "path": "/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent(parameters('StorageAccountName')))}/tables/@{encodeURIComponent(parameters('TableName'))}/entities(PartitionKey='@{encodeURIComponent(triggerBody()?['properties_billingScopeId'])}',RowKey='@{encodeURIComponent(triggerBody()?['properties_billingScopeId'])}')"
+              },
+              "runAfter": {}
+            },
+            "Condition": {
+              "type": "If",
+              "expression": { "and": [ { "equals": [ "@body('Get_entity_(V2)')?['RowKey']", "@{triggerBody()?['properties_billingScopeId']}" ] } ] },
+              "actions": {
+                "HTTP2": {
+                  "type": "Http",
+                  "inputs": {
+                    "uri": "https://management.azure.com/providers/Microsoft.Capacity/reservationOrders/1?api-version=2022-11-01",
+                    "method": "PUT",
+                    "body": {
+                      "sku": { "name": "@{triggerBody()?['sku_name']}" },
+                      "location": "@{triggerBody()?['location']}",
+                      "properties": {
+                        "reservedResourceType": "@{triggerBody()?['properties_reservedResourceType']}",
+                        "billingScopeId": "/subscriptions/@{triggerBody()?['properties_billingScopeId']}",
+                        "term": "@{triggerBody()?['properties_term']}",
+                        "quantity": "@{triggerBody()?['properties_quantity']}",
+                        "appliedScopeType": "@{triggerBody()?['properties_appliedScopeType']}",
+                        "displayName": "@{triggerBody()?['properties_displayName']}",
+                        "instanceFlexibility": "@{triggerBody()?['properties_instanceFlexibility']}",
+                        "renew": "@{triggerBody()?['properties_renew']}",
+                        "billingPlan": "@{triggerBody()?['properties_billingPlan']}",
+                        "reservedResourceProperties": { "instanceFlexibility": "@{triggerBody()?['properties_reservedResourceProperties_instanceFlexibility']}" },
+                        "appliedScopes": "@{triggerBody()?['properties_appliedScopes']}"
+                      },
+                      "orderId": "1@{triggerBody()?['reservationOrderId']}",
+                      "isPurchaseRecommended": false,
+                      "isPurchaseIsfGrouped": false
+                    },
+                    "authentication": { "type": "ManagedServiceIdentity", "audience": "https://management.azure.com/" }
+                  }
+                },
+                "Parse_JSON": {
+                  "type": "ParseJson",
+                  "inputs": {
+                    "content": "@body('HTTP2')",
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string" },
+                        "name": { "type": "string" },
+                        "type": { "type": "string" },
+                        "etag": { "type": "integer" },
+                        "properties": {
+                          "type": "object",
+                          "properties": {
+                            "originalQuantity": { "type": "integer" },
+                            "requestDateTime": { "type": "string" },
+                            "billingPlan": { "type": "string" },
+                            "reservations": {
+                              "type": "array",
+                              "items": { "type": "object", "properties": { "id": { "type": "string" } }, "required": [ "id" ] }
+                            },
+                            "term": { "type": "string" },
+                            "displayName": { "type": "string" },
+                            "provisioningState": { "type": "string" },
+                            "billingProfileId": { "type": "string" },
+                            "billingAccountId": { "type": "string" }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "runAfter": { "HTTP2": [ "Succeeded", "Failed", "Skipped", "TimedOut" ] }
+                },
+                "Response": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "inputs": { "statusCode": 200, "body": "@body('HTTP2')" },
+                  "runAfter": { "Parse_JSON": [ "Succeeded", "Failed", "Skipped", "TimedOut" ] }
+                }
+              },
+              "else": {
+                "actions": {
+                  "Response_1": {
+                    "type": "Response",
+                    "kind": "Http",
+                    "inputs": { "statusCode": 200, "body": "Not allowed to buy reservation under this billing scope." }
+                  }
+                }
+              },
+              "runAfter": { "Get_entity_(V2)": [ "Succeeded", "Failed", "Skipped", "TimedOut" ] }
+            }
+          },
+          "outputs": {}
+        },
+        "parameters": {
+          "$connections": {
+            "value": {
+              "azuretables": {
+                "connectionId": "[resourceId('Microsoft.Web/connections', variables('azureTablesConnectionName'))]",
+                "connectionName": "[variables('azureTablesConnectionName')]",
+                "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuretables')]"
+              }
+            }
+          },
+          "StorageAccountName": { "value": "[parameters('storageAccountName')]" },
+          "TableName": { "value": "[parameters('tableName')]" }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/connections', variables('azureTablesConnectionName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "storageAccountId": { "type": "string", "value": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]" },
+    "managedIdentityId": { "type": "string", "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', parameters('identityName'))]" },
+    "logicApps": {
+      "type": "object",
+      "value": {
+        "ApprovedSubsUpdater": "[parameters('laApprovedSubsUpdaterName')]",
+        "RICalculate": "[parameters('laRICalculateName')]",
+        "RIPurchase": "[parameters('laRIPurchaseName')]"
+      }
+    }
+  }
+}
