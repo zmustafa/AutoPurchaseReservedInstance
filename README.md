@@ -28,15 +28,14 @@ The list of approved subscriptions that can be used as an approved billing scope
 The HTTP calls to the Logic App to invoke calculate/purchase API can be made using the provided PowerShell script.
 
 # 3. Steps to setup 
-1. Create a managed identity ManagedIdentity-RIPurchasherAccess
-2. Assign 'ManagedIdentity-RIPurchasherAccess' reader on tenant root group
-3. Assign 'ManagedIdentity-RIPurchasherAccess' RBAC of 'Reservations Contributor' under IAM of 'Reservations' blade
-4. Create a blank logic app call it 'LogicApp-Approved-Subscriptions-Updater'
-5. Modify logic app 'LogicApp-Approved-Subscriptions-Updater' to use the user generated managed identity 'ManagedIdentity-RIPurchasherAccess'
-6. Clone the logic app 'LogicApp-Approved-Subscriptions-Updater' to two more logic apps 'LogicApp-RI-Calculate' and 'LogicApp-RI-Purchase' (in total they become 3)
-7. Add storage connector to each of the logic apps.
-8. Paste the code, except the connection part at the bottom.
-9. Take note of the two URLs of each of the logic apps  'LogicApp-RI-Calculate' and 'LogicApp-RI-Purchase' and to use them via PowerShell script.
+
+In order to deploy, you can deploy using the ARM template using the button below. Then use the below steps to set it up.
+
+<a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fzmustafa%2FAutoPurchaseReservedInstance%2Frefs%2Fheads%2Fmain%2FarmTemplate.json" target="_blank"><img src="https://aka.ms/deploytoazurebutton"/></a>
+
+1. Grant managed identity RBAC of 'Reader' over Tenant Root Group
+2. Grant managed identity RBAC of 'Reservations Contributor' under 'Reservations' blade
+3. Open each of the 3 logic app and update the HTTP Request object to create the newly created managed identity
 
 # 4 Make a Reserved Instance purchase
 ## 4.1 Create Reservation Order
@@ -56,10 +55,6 @@ Reservation Order ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 Confirm purchase
 ```powershell
 Are you sure you want to purchase the reservation? (Y/N) y
-```
-# 5 Deploy
-In order to deploy, you can deploy using the ARM template using the button below then open each of the 3 logic app and update the HTTP Request object to create the newly created managed identity
+``` 
 
-
-<a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fzmustafa%2FAutoPurchaseReservedInstance%2Frefs%2Fheads%2Fmain%2FarmTemplate.json" target="_blank"><img src="https://aka.ms/deploytoazurebutton"/></a>
  
