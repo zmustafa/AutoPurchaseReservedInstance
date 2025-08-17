@@ -33,9 +33,9 @@ In order to deploy, you can deploy using the ARM template using the button below
 
 <a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fzmustafa%2FAutoPurchaseReservedInstance%2Frefs%2Fheads%2Fmain%2FarmTemplate.json" target="_blank"><img src="https://aka.ms/deploytoazurebutton"/></a>
 
-1. Grant managed identity RBAC of 'Reader' over Tenant Root Group
-2. Grant managed identity RBAC of 'Reservations Contributor' under 'Reservations' blade
-3. Open each of the 3 logic app and update the HTTP Request object to create the newly created managed identity
+1. Grant managed identity RBAC of 'Reader' over Tenant Root Group.
+2. Grant managed identity RBAC of 'Reservations Contributor' under 'Reservations' blade.
+3. Open each of the 3 logic app and update the HTTP Request object to use the newly created managed identity under the HTTP Request step when authenticating.
 
 # 4 Make a Reserved Instance purchase
 ## 4.1 Create Reservation Order
