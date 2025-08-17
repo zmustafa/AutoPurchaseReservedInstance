@@ -3,6 +3,9 @@
 # 1. Introduction
 This utility allows to automatically purchase Azure Reserved Instances via simplified PowerShell script.
 
+<a href="https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fzmustafa%2FAutoPurchaseReservedInstance%2Frefs%2Fheads%2Fmain%2FarmTemplate.json" target="_blank"><img src="https://aka.ms/deploytoazurebutton"/></a>
+ 
+
 # 2. Components
 ## 2.1 Server Side
 There is one managed identity, one storage account, and 3 logic apps
