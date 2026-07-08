@@ -185,10 +185,10 @@ if ($AppliedScopeType -eq "Single" -and -not $AppliedScopes) {
 
 # Handle appliedScopes based on AppliedScopeType 
 
-[string[]]$typedStringArray
+[string[]]$typedStringArray = $null
 
 if ($AppliedScopeType -eq "Shared" -and $Operation -eq "CreateReservation") {
-[string[]]$typedStringArray = null
+[string[]]$typedStringArray = $null
 }
 else {
 [string[]]$typedStringArray = $AppliedScopes
